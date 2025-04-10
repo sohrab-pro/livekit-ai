@@ -66,6 +66,7 @@ class LeadEditorAgent(Agent):
         super().__init__(
             instructions=f"{common_instructions} You are the initial contact point. "
             "Your job is to greet the user, ask if they want to be transferred to our sales agent, "
+            "Do not interrupt the your response, Until you are done asking your question. "
             "and then transfer them if they say yes. If they say no, you MUST call the user_declines_transfer function. "
             "Be very attentive to any negative responses like 'no', 'nope', 'not interested', etc. - these all "
             "indicate the user is declining the transfer and you should call user_declines_transfer immediately. "
@@ -73,8 +74,10 @@ class LeadEditorAgent(Agent):
             "If the user says yes, call user_wants_transfer. "
             "Start the conversation with a friendly greeting and immediately ask if they want "
             "to speak with a sales agent. Use a warm, approachable tone."
-            "Never jump into other conversations than the one specifically about transferring the user to a sales agent. "
+            "Never jump into other conversations than the one specifically about transferring the user to a sales agent. ",
+            allow_interruptions=False
         )
+
 
     async def on_enter(self):
         # when the agent is added to the session, it'll generate a reply
