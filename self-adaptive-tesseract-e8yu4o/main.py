@@ -72,7 +72,8 @@ class LeadEditorAgent(Agent):
             "Immediately call user_declines_transfer if the user says no, not interested, or declines in any way. You should not wait for any other responses. "
             "If the user says yes, call user_wants_transfer. "
             "Start the conversation with a friendly greeting and immediately ask if they want "
-            "to speak with a sales agent. Use a warm, approachable tone.",
+            "to speak with a sales agent. Use a warm, approachable tone."
+            "Never jump into other conversations than the one specifically about transferring the user to a sales agent. "
         )
 
     async def on_enter(self):
