@@ -66,7 +66,9 @@ class LeadEditorAgent(Agent):
         super().__init__(
             instructions=f"{common_instructions} You are the initial contact point. "
             "Your job is to greet the user, ask if they want to be transferred to our sales agent, "
-            "and then transfer them if they say yes. If they say no, thank them for their time. "
+            "and then transfer them if they say yes. If they say no, you MUST call the user_declines_transfer function. "
+            "Be very attentive to any negative responses like 'no', 'nope', 'not interested', etc. - these all "
+            "indicate the user is declining the transfer and you should call user_declines_transfer immediately. "
             "Start the conversation with a friendly greeting and immediately ask if they want "
             "to speak with a sales agent. Use a warm, approachable tone.",
         )
@@ -108,7 +110,7 @@ class LeadEditorAgent(Agent):
         
         sales_agent = SpecialistEditorAgent("sales", chat_ctx=context.session._chat_ctx)
 
-        logger.info("transferring to sales agent")
+        logger.info("transferring user to sales agent")
         return sales_agent, "Great! I'll transfer you to our sales agent now."
 
     @function_tool
@@ -117,9 +119,10 @@ class LeadEditorAgent(Agent):
         context: RunContext[StoryData],
     ):
         """Called when the user has declined to be transferred to a sales agent.
+        Call this function immediately when the user says no, not interested, or declines in any way.
         """
         
-        logger.info("user declined transfer to sales agent")
+        logger.info("user declined transfer to sales agent, ending call")
         
         # interrupt any existing generation
         self.session.interrupt()
@@ -130,8 +133,17 @@ class LeadEditorAgent(Agent):
             allow_interruptions=False
         )
         
-        job_ctx = get_job_context()
-        await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
+        try:
+            # Get the job context
+            job_ctx = get_job_context()
+            logger.info(f"Attempting to close room: {job_ctx.room.name}")
+            
+            # Delete the room
+            response = await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
+            logger.info(f"Room deletion response: {response}")
+        except Exception as e:
+            logger.error(f"Failed to close room: {str(e)}")
+            # Log failure but don't attempt other methods that don't exist
 
 
 class SpecialistEditorAgent(Agent):
@@ -146,6 +158,7 @@ class SpecialistEditorAgent(Agent):
             # realtime and non-realtime models
             tts=openai.TTS(voice="echo"),
             chat_ctx=chat_ctx,
+            allow_interruptions=False
         )
 
     async def on_enter(self):
