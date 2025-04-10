@@ -36,44 +36,39 @@ logger = logging.getLogger("multi-agent")
 load_dotenv(dotenv_path=".env.local")
 
 common_instructions = (
-    "You are an editor at a leading publishing house, with a strong track record "
-    "of discovering and nurturing new talent. You are a great communicator and ask "
-    "the right questions to get the best out of people. You want the best for your "
-    "authors, and you are not afraid to tell them when their ideas are not good enough."
+    "You are a helpful virtual assistant for a technology company. Your primary goal "
+    "is to determine if the user wants to speak with a sales agent. You should ask "
+    "if they want to be transferred to our sales team. Be polite and professional at all times."
 )
 
 
 @dataclass
 class CharacterData:
-    # Shared data that's used by the editor agent.
+    # Shared data that's used by the main agent.
     # This structure is passed as a parameter to function calls.
 
     name: Optional[str] = None
-    background: Optional[str] = None
+    query: Optional[str] = None
 
 
 @dataclass
 class StoryData:
-    # Shared data that's used by the editor agent.
+    # Shared data that's used by the agents.
     # This structure is passed as a parameter to function calls.
 
-    characters: list[CharacterData] = field(default_factory=list)
-    locations: list[str] = field(default_factory=list) 
-    theme: Optional[str] = None
+    user_info: list[CharacterData] = field(default_factory=list)
+    wants_transfer: bool = False
+    query_type: Optional[str] = None
 
 
 class LeadEditorAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions=f"{common_instructions} You are the lead editor at this business, "
-            "and are yourself a generalist -- but empoly several specialist editors, "
-            "specializing in childrens' books and fiction, respectively. You trust your "
-            "editors to do their jobs, and will hand off the conversation to them when you feel "
-            "you have an idea of the right one."
-            "Your goal is to gather a few pieces of information from the user about their next"
-            "idea for a short story, and then hand off to the right agent."
-            "Start the conversation with a short introduction, then get straight to the "
-            "details. You may hand off to either editor as soon as you know which one is the right fit.",
+            instructions=f"{common_instructions} You are the initial contact point. "
+            "Your job is to greet the user, ask if they want to be transferred to our sales agent, "
+            "and then transfer them if they say yes. If they say no, thank them for their time. "
+            "Start the conversation with a friendly greeting and immediately ask if they want "
+            "to speak with a sales agent. Use a warm, approachable tone.",
         )
 
     async def on_enter(self):
@@ -82,104 +77,71 @@ class LeadEditorAgent(Agent):
         self.session.generate_reply()
 
     @function_tool
-    async def character_introduction(
+    async def user_introduction(
         self,
         context: RunContext[StoryData],
         name: str,
-        background: str,
+        query: str,
     ):
-        """Called when the user has provided a character.
+        """Called when the user has provided their information.
 
         Args:
-            name: The name of the character
-            background: The character's history, occupation, and other details
+            name: The name of the user
+            query: What the user is interested in or asking about
         """
 
-        character = CharacterData(name=name, background=background)
-        context.userdata.characters.append(character)
+        user = CharacterData(name=name, query=query)
+        context.userdata.user_info.append(user)
 
         logger.info(
-            "added character to the story: %s", name
+            "added user info: %s with query: %s", name, query
         )
 
     @function_tool
-    async def location_introduction(
+    async def user_wants_transfer(
         self,
         context: RunContext[StoryData],
-        location: str,
     ):
-        """Called when the user has provided a location.
-
-        Args:
-            location: The name of the location
+        """Called when the user has indicated they want to be transferred to a sales agent.
         """
+        context.userdata.wants_transfer = True
+        
+        sales_agent = SpecialistEditorAgent("sales", chat_ctx=context.session._chat_ctx)
 
-        context.userdata.locations.append(location)
-
-        logger.info(
-            "added location to the story: %s", location
-        )
+        logger.info("transferring to sales agent")
+        return sales_agent, "Great! I'll transfer you to our sales agent now."
 
     @function_tool
-    async def theme_introduction(
-        self,
-        context: RunContext[StoryData],
-        theme: str,
-    ):
-        """Called when the user has provided a theme.
-
-        Args:
-            theme: The name of the theme
-        """
-
-        context.userdata.theme = theme
-
-        logger.info(
-            "set theme to the story: %s", theme
-        )
-
-    @function_tool
-    async def detected_childrens_book(
+    async def user_declines_transfer(
         self,
         context: RunContext[StoryData],
     ):
-        """Called when the user has provided enough information to suggest a children's book.
+        """Called when the user has declined to be transferred to a sales agent.
         """
-
-        childrens_editor = SpecialistEditorAgent("children's books", chat_ctx=context.session._chat_ctx)
-        # here we are creating a ChilrensEditorAgent with the full chat history,
-        # as if they were there in the room with the user the whole time.
-        # we could also omit it and rely on the userdata to share context.
-
-        logger.info(
-            "switching to the children's book editor with the provided user data: %s", context.userdata
+        
+        logger.info("user declined transfer to sales agent")
+        
+        # interrupt any existing generation
+        self.session.interrupt()
+        
+        # generate a goodbye message and hang up
+        await self.session.generate_reply(
+            instructions="thank the user for their time and end the conversation with a short, polite message", 
+            allow_interruptions=False
         )
-        return childrens_editor, "Let's switch to the children's book editor."
-
-    @function_tool
-    async def detected_novel(
-        self,
-        context: RunContext[StoryData],
-    ):
-        """Called when the user has provided enough information to suggest a children's book.
-        """
-
-        childrens_editor = SpecialistEditorAgent("novels", chat_ctx=context.session._chat_ctx)
-        # here we are creating a ChilrensEditorAgent with the full chat history,
-        # as if they were there in the room with the user the whole time.
-        # we could also omit it and rely on the userdata to share context.
-
-        logger.info(
-            "switching to the children's book editor with the provided user data: %s", context.userdata
-        )
-        return childrens_editor, "Let's switch to the children's book editor."
+        
+        job_ctx = get_job_context()
+        await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
 
 
 class SpecialistEditorAgent(Agent):
     def __init__(self, specialty: str, chat_ctx: Optional[ChatContext] = None) -> None:
         super().__init__(
-            instructions=f"{common_instructions}. You specialize in {specialty}, and have "
-            "worked with some of the greats, and have even written a few books yourself.",
+            instructions=f"{common_instructions} You are a {specialty} agent. "
+            "You are knowledgeable about our products and services. Your goal is to help "
+            "the user with their sales-related inquiries. Be professional, helpful, and "
+            "try to address their needs efficiently. If they have questions about "
+            "products, pricing, or purchasing, provide helpful information.",
             # each agent could override any of the model services, including mixing
             # realtime and non-realtime models
             tts=openai.TTS(voice="echo"),
@@ -192,66 +154,48 @@ class SpecialistEditorAgent(Agent):
         self.session.generate_reply()
 
     @function_tool
-    async def character_introduction(
+    async def gather_user_info(
         self,
         context: RunContext[StoryData],
         name: str,
-        background: str,
+        query: str,
     ):
-        """Called when the user has provided a character.
+        """Called when the sales agent needs to gather more information from the user.
 
         Args:
-            name: The name of the character
-            background: The character's history, occupation, and other details
+            name: The name of the user
+            query: The user's request or question
         """
 
-        character = CharacterData(name=name, background=background)
-        context.userdata.characters.append(character)
+        user = CharacterData(name=name, query=query)
+        context.userdata.user_info.append(user)
 
         logger.info(
-            "added character to the story: %s", name
+            "sales agent gathered info from user: %s with query: %s", name, query
         )
 
     @function_tool
-    async def location_introduction(
+    async def set_query_type(
         self,
         context: RunContext[StoryData],
-        location: str,
+        query_type: str,
     ):
-        """Called when the user has provided a location.
+        """Called to categorize the type of query.
 
         Args:
-            location: The name of the location
+            query_type: The category of the user's query (product, pricing, support, etc.)
         """
 
-        context.userdata.locations.append(location)
+        context.userdata.query_type = query_type
 
         logger.info(
-            "added location to the story: %s", location
+            "sales agent categorized query as: %s", query_type
         )
 
     @function_tool
-    async def theme_introduction(
-        self,
-        context: RunContext[StoryData],
-        theme: str,
-    ):
-        """Called when the user has provided a theme.
-
-        Args:
-            theme: The name of the theme
-        """
-
-        context.userdata.theme = theme
-
-        logger.info(
-            "set theme to the story: %s", theme
-        )
-
-    @function_tool
-    async def story_finished(self, context: RunContext[StoryData]):
-        """When the editor think the broad strokes of the story have been hammered out,
-        they can stop you with their final thoughts.
+    async def conversation_finished(self, context: RunContext[StoryData]):
+        """When the sales agent has finished helping the user, 
+        they can end the conversation.
         """
         # interrupt any existing generation
         self.session.interrupt()
@@ -259,7 +203,8 @@ class SpecialistEditorAgent(Agent):
         # generate a goodbye message and hang up
         # awaiting it will ensure the message is played out before returning
         await self.session.generate_reply(
-            instructions="give brief but honest feedback on the story idea", allow_interruptions=True
+            instructions="thank the user for their time and end the conversation with a polite message", 
+            allow_interruptions=False
         )
 
         job_ctx = get_job_context()
