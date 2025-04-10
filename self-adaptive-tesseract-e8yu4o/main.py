@@ -69,6 +69,8 @@ class LeadEditorAgent(Agent):
             "and then transfer them if they say yes. If they say no, you MUST call the user_declines_transfer function. "
             "Be very attentive to any negative responses like 'no', 'nope', 'not interested', etc. - these all "
             "indicate the user is declining the transfer and you should call user_declines_transfer immediately. "
+            "Immediately call user_declines_transfer if the user says no, not interested, or declines in any way. You should not wait for any other responses. "
+            "If the user says yes, call user_wants_transfer. "
             "Start the conversation with a friendly greeting and immediately ask if they want "
             "to speak with a sales agent. Use a warm, approachable tone.",
         )
